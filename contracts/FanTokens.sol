@@ -32,6 +32,7 @@ contract FanTokens is ReentrancyGuard {
     event TokensBought(uint256 indexed tid, address indexed buyer, uint256 paid, uint256 minted);
     event TokensTransferred(uint256 indexed tid, address indexed from, address indexed to, uint256 amount);
     event TokenDeactivated(uint256 indexed tid);
+    event TokenWithdrawn(uint256 indexed tid, address indexed creator, uint256 amount);
 
     function createToken(string calldata name, string calldata symbol, uint256 price) external returns (uint256) {
         require(price > 0, "Zero price");
@@ -77,6 +78,21 @@ contract FanTokens is ReentrancyGuard {
         require(t.active, "Already inactive");
         t.active = false;
         emit TokenDeactivated(tid);
+    }
+
+    // FIX: buyTokens collected raised ETH but nobody could ever withdraw it —
+    // one-way lockbox. Creator can now pull the raised balance out once the
+    // token is deactivated.
+    function withdrawTokens(uint256 tid) external nonReentrant {
+        FanToken storage t = tokens[tid];
+        require(msg.sender == t.creator, "Creator only");
+        require(!t.active, "Token active");
+        uint256 raised = t.raised;
+        require(raised > 0, "Nothing raised");
+        t.raised = 0;
+        (bool ok,) = payable(msg.sender).call{value: raised}("");
+        require(ok, "ETH transfer failed");
+        emit TokenWithdrawn(tid, msg.sender, raised);
     }
 
     function tokenInfo(uint256 tid) external view returns (address creator, string memory name, string memory symbol, uint256 supply, uint256 price, uint256 raised, bool active, uint256 holders) {
